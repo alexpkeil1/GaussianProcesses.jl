@@ -11,7 +11,6 @@ mutable struct BKMR{X<:AbstractMatrix,Z<:AbstractMatrix,Y<:AbstractVector{<:Real
     z::Z
     "Output observations"
     y::Y
-
     # Model
     "Mean object"
     mean::M
@@ -21,7 +20,6 @@ mutable struct BKMR{X<:AbstractMatrix,Z<:AbstractMatrix,Y<:AbstractVector{<:Real
     lik::L
     "Strategy for computing or approximating covariance matrices"
     covstrat::CS
-
     # Auxiliary data
     "Dimension of inputs: gaussian process function"
     dim::Int
@@ -78,7 +76,7 @@ end
 
 Fit a Bayesian kernel machine (BKM) to a set of training points. The Gaussian process with
 non-Gaussian observations is defined in terms of its user-defined likelihood function,
-mean and covaiance (kernel) functions.
+mean and covariance (kernel) functions.
 
 The non-Gaussian likelihood is handled by a Monte Carlo method. The latent function
 values are represented by centered (whitened) variables ``f(x) = m(x) + Lv`` where
@@ -497,7 +495,7 @@ function Base.show(io::IO, kmr::BKMR)
     end
 end
 
-——————————————————————————————————
+#——————————————————————————————————
 # Sample random draws from the BKMR
 function Random.rand!(kmr::GPBase, x::AbstractMatrix, z::AbstractMatrix, A::DenseMatrix)
     nobs = size(x,2)
