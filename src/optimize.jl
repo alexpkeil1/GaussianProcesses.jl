@@ -1,5 +1,6 @@
 get_params_kwargs(::GPE; kwargs...) = delete!(Dict(kwargs), :lik)
 get_params_kwargs(::GPMC; kwargs...) = delete!(Dict(kwargs), :noise)
+get_params_kwargs(::BKMR; kwargs...) = delete!(Dict(kwargs), :noise)
 
 """
     optimize!(gp::GPBase; kwargs...)

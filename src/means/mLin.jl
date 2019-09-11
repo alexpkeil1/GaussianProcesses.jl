@@ -22,6 +22,8 @@ mutable struct MeanLin <: Mean
     """
     MeanLin(β::Vector{Float64}) = new(β, [])
 end
+MeanLin(β::Float64) = MeanLin([β])
+
 
 mean(mLin::MeanLin, x::AbstractVector) = dot(mLin.β, x)
 mean(mLin::MeanLin, X::AbstractMatrix) = X'mLin.β

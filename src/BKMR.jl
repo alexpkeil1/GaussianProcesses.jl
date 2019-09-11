@@ -47,13 +47,12 @@ mutable struct BKMR{X<:AbstractMatrix,Z<:AbstractMatrix,Y<:AbstractVector{<:Real
     "Gradient of log-target (gradient of marginal log-likelihood + gradient of log priors)"
     dtarget::Vector{Float64}
 
-    function BKMR{X,Z,Y,M,K,L,CS,D}(x::X, y::Y, mean::M, kernel::K, lik::L, covstrat::CS, data::D) where {X,Z,Y,M,K,L,CS,D}
+    function BKMR{X,Z,Y,M,K,L,CS,D}(x::X, z::Z, y::Y, mean::M, kernel::K, lik::L, covstrat::CS, data::D) where {X,Z,Y,M,K,L,CS,D}
         dim, nobs = size(x)
         dimz, nobsz = size(z)
         length(y) == nobs || throw(ArgumentError("Input and output observations must have consistent dimensions."))
         nobsz == nobs || throw(ArgumentError("Input (X) and input (Z) observations must have consistent dimensions."))
-        kmr = new{X,Z,Y,M,K,L,CS,D}(x, y, mean, kernel, lik, covstrat, dim, nobs, 
-                                 data, zeros(nobs))
+        kmr = new{X,Z,Y,M,K,L,CS,D}(x, z, y, mean, kernel, lik, covstrat, dim, dimz, nobs, nobsz, data, zeros(nobs))
         initialise_target!(kmr)
     end
 end
@@ -64,15 +63,16 @@ function BKMR(x::AbstractMatrix,z::AbstractMatrix, y::AbstractVector{<:Real}, me
                 x, z, y, mean, kernel, lik, covstrat, data)
 end
 
-function BKMR(x::AbstractMatrix, y::AbstractVector{<:Real}, mean::Mean, kernel::Kernel, lik::Likelihood, covstrat::CovarianceStrategy)
-    data = KernelData(kernel, x, x, covstrat)
-    return GPMC{typeof(x),typeof(y),typeof(mean),typeof(kernel),typeof(lik),typeof(covstrat),typeof(data)}(
-                x, y, mean, kernel, lik, covstrat, data)
-end
+# todo: default to mean zero GP if no Z is specified
+#function BKMR(x::AbstractMatrix,z::AbstractMatrix, y::AbstractVector{<:Real}, mean::Mean, kernel::Kernel, lik::Likelihood, covstrat::CovarianceStrategy)
+#    data = KernelData(kernel, x, x, covstrat)
+#    return GPMC{typeof(x),typeof(y),typeof(mean),typeof(kernel),typeof(lik),typeof(covstrat),typeof(data)}(
+#                x, y, mean, kernel, lik, covstrat, data)
+#end
 
 
 """
-    BKMR(x, y, mean, kernel, lik)
+    BKMR(x, z, y, mean, kernel, lik)
 
 Fit a Bayesian kernel machine (BKM) to a set of training points. The Gaussian process with
 non-Gaussian observations is defined in terms of its user-defined likelihood function,
@@ -90,7 +90,12 @@ values are represented by centered (whitened) variables ``f(x) = m(x) + Lv`` whe
 - `kernel::Kernel`: Covariance function
 - `lik::Likelihood`: Likelihood function
 """
-function BKMR(x::AbstractMatrix,z::AbstractMatrix, y::AbstractVector{<:Real}, mean::Mean, kernel::Kernel, lik::Likelihood)
+#function BKMR(x::AbstractMatrix,z::AbstractMatrix, y::AbstractVector{<:Real}, mean::Mean, kernel::Kernel, lik::Likelihood)
+#    covstrat = FullCovariance()
+#    return BKMR(x,z, y, mean, kernel, lik, covstrat)
+#end
+
+function BKMR(x::X,z::Z, y::Y, mean::M, kernel::K, lik::L) where{X<:AbstractMatrix,Z<:AbstractMatrix,Y<:AbstractVector{<:Real},M<:Mean,K<:Kernel, L<:Likelihood}
     covstrat = FullCovariance()
     return BKMR(x,z, y, mean, kernel, lik, covstrat)
 end
@@ -342,7 +347,8 @@ end
 """ Compute predictions using the standard multivariate normal 
     conditional distribution formulae.
 """
-function predictMVN(kmr::GPBase,xpred::AbstractMatrix,zpred::AbstractMatrix, 
+function predictMVN(kmr::GPBase,
+                   xpred::AbstractMatrix,zpred::AbstractMatrix, 
                    xtrain::AbstractMatrix, ztrain::AbstractMatrix, ytrain::AbstractVector, 
                    kernel::Kernel, meanf::Mean, alpha::AbstractVector,
                    covstrat::CovarianceStrategy, Ktrain::AbstractPDMat)
@@ -366,9 +372,10 @@ end
 
 
 
-predict_full(kmr::BKMR, xpred::AbstractMatrix, zpred::AbstractMatrix) = predictMVN(gp,xpred, gp.x, gp.z, gp.y, gp.kernel, gp.mean, gp.alpha, gp.covstrat, gp.cK)
+predict_full(kmr::BKMR, xpred::AbstractMatrix, zpred::AbstractMatrix) = 
+  predictMVN(kmr,xpred, zpred, kmr.x, kmr.z, kmr.y, kmr.kernel, kmr.mean, kmr.alpha, kmr.covstrat, kmr.cK)
 """
-    predict_full(gp::GPE, x::Union{Vector{Float64},Matrix{Float64}, z::Union{Vector{Float64},Matrix{Float64}}[; full_cov::Bool=false])
+    predict_full(kmr::GPE, x::Union{Vector{Float64},Matrix{Float64}, z::Union{Vector{Float64},Matrix{Float64}}[; full_cov::Bool=false])
 
 Return the predictive mean and variance of Kernel machine `kmr` at specfic points which
 are given as columns of matrix `x`. If `full_cov` is `true`, the full covariance matrix is
@@ -384,16 +391,16 @@ given as columns of matrixes `X` and `Z`. If `full_cov` is `true`, the full cova
 returned instead of only variances.
 """
 function predict_f(kmr::GPBase, x::AbstractMatrix, z::AbstractMatrix; full_cov::Bool=false)
-    size(x,1) == gp.dim || throw(ArgumentError("Kernel machine object and input observations (X) do not have consistent dimensions"))
-    size(z,1) == gp.dimz || throw(ArgumentError("Kernel machine object and input observations (Z) do not have consistent dimensions"))
+    size(x,1) == kmr.dim || throw(ArgumentError("Kernel machine object and input observations (X) do not have consistent dimensions"))
+    size(z,1) == kmr.dimz || throw(ArgumentError("Kernel machine object and input observations (Z) do not have consistent dimensions"))
     if full_cov
-        return predict_full(gp, x, z)
+        return predict_full(kmr, x, z)
     else
         ## Calculate prediction for each point independently
         μ = Array{eltype(x)}(undef, size(x,2))
         σ2 = similar(μ)
         for k in 1:size(x,2)
-            m, sig = predict_full(gp, x[:,k:k], z[:,k:k])
+            m, sig = predict_full(kmr, x[:,k:k], z[:,k:k])
             μ[k] = m[1]
             σ2[k] = max(diag(sig)[1], 0.0)
         end
@@ -403,6 +410,15 @@ end
 
 
 appendlikbounds!(lb, ub, kmr::BKMR, bounds) = appendbounds!(lb, ub, num_params(kmr.lik), bounds)
+
+function num_params(kmr::BKMR; lik::Bool=true, domean::Bool=true, kern::Bool=true)
+    n = length(kmr.v)
+    lik && (n += num_params(kmr.lik))
+    domean && (n += num_params(kmr.mean))
+    kern && (n += num_params(kmr.kernel))
+    n
+end
+
 
 function get_params(kmr::BKMR; lik::Bool=true, domean::Bool=true, kern::Bool=true)
     params = Float64[]
@@ -419,13 +435,6 @@ function get_params(kmr::BKMR; lik::Bool=true, domean::Bool=true, kern::Bool=tru
     return params
 end
 
-function num_params(kmr::BKMR; lik::Bool=true, domean::Bool=true, kern::Bool=true)
-    n = length(kmr.v)
-    lik && (n += num_params(kmr.lik))
-    domean && (n += num_params(kmr.mean))
-    kern && (n += num_params(kmr.kernel))
-    n
-end
 
 function set_params!(kmr::BKMR, hyp::AbstractVector; process::Bool=true, lik::Bool=true, domean::Bool=true, kern::Bool=true)
     n_lik_params = num_params(kmr.lik)
@@ -469,32 +478,6 @@ function prior_gradlogpdf(kmr::BKMR; process::Bool=true, lik::Bool=true, domean:
     return grad
 end
 
-
-function Base.show(io::IO, kmr::BKMR)
-    println(io, "KMR Monte Carlo object:")
-    println(io, "  Dim = ", kmr.dim)
-    println(io, "  Dim Z = ", kmr.dimz)
-    println(io, "  Number of observations = ", kmr.nobs)
-    println(io, "  Mean function:")
-    show(io, kmr.mean, 2)
-    println(io, "\n  Kernel:")
-    show(io, kmr.kernel, 2)
-    println(io, "\n  Likelihood:")
-    show(io, kmr.lik, 2)
-    if kmr.nobs == 0
-        println("\n  No observation data")
-    else
-        println(io, "\n  Input observations: gaussian process function = ")
-        show(io, kmr.x)
-        println(io, "\n  Input observations: fixed effects = ")
-        show(io, kmr.z)
-        print(io,"\n  Output observations = ")
-        show(io, kmr.y)
-        print(io,"\n  Log-posterior = ")
-        show(io, round(kmr.target; digits = 3))
-    end
-end
-
 #——————————————————————————————————
 # Sample random draws from the BKMR
 function Random.rand!(kmr::GPBase, x::AbstractMatrix, z::AbstractMatrix, A::DenseMatrix)
@@ -527,3 +510,32 @@ Random.rand(kmr::GPBase, x::AbstractMatrix, z::AbstractMatrix) = vec(rand(kmr,x,
 Random.rand(kmr::GPBase, x::AbstractMatrix, z::AbstractVector) = vec(rand(kmr,x,z',1))
 Random.rand(kmr::GPBase, x::AbstractVector, z::AbstractMatrix) = vec(rand(kmr,x',z,1))
 Random.rand(kmr::GPBase, x::AbstractVector, z::AbstractVector) = vec(rand(kmr,x',z',1))
+
+
+
+function Base.show(io::IO, kmr::BKMR)
+    println(io, "KMR Monte Carlo object:")
+    println(io, "  N variables in h(x) = ", kmr.dim)
+    println(io, "  N fixed effects = ", kmr.dimz)
+    println(io, "  Number of observations = ", kmr.nobs)
+    println(io, "  Mean function:")
+    show(io, kmr.mean, 2)
+    println(io, "\n  Kernel:")
+    show(io, kmr.kernel, 2)
+    println(io, "\n  Likelihood:")
+    show(io, kmr.lik, 2)
+    if kmr.nobs == 0
+        println("\n  No observation data")
+    else
+        println(io, "\n  Input observations: gaussian process function = ")
+        show(io, kmr.x)
+        println(io, "\n  Input observations: fixed effects = ")
+        show(io, kmr.z)
+        print(io,"\n  Output observations = ")
+        show(io, kmr.y)
+        print(io,"\n  Log-posterior = ")
+        show(io, round(kmr.target; digits = 3))
+    end
+end
+
+Base.show(kmr::BKMR) = Base.show(Base.stdout, kmr)
